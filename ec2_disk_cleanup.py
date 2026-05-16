@@ -7,7 +7,7 @@ DEFAULT_REQUIRED_TAG_KEY = "AutoDiskCleanup"
 DEFAULT_REQUIRED_TAG_VALUE = "enabled"
 DEFAULT_DISK_THRESHOLD_PERCENT = 85
 DEFAULT_TMP_DAYS = 1
-DEFAULT_LOG_RETENTION_DAYS = 7
+DEFAULT_LOG_FILE_RETENTION_DAYS = 7
 DEFAULT_SSM_POLL_SECONDS = 3
 DEFAULT_SSM_WAIT_SECONDS = 600
 DEFAULT_SSM_TIMEOUT_SECONDS = 600
@@ -25,8 +25,14 @@ def lambda_handler(event, context):
     required_tag_key = os.environ.get("REQUIRED_TAG_KEY", DEFAULT_REQUIRED_TAG_KEY)
     required_tag_value = os.environ.get("REQUIRED_TAG_VALUE", DEFAULT_REQUIRED_TAG_VALUE)
     disk_threshold_percent = int(os.environ.get("DISK_THRESHOLD_PERCENT", DEFAULT_DISK_THRESHOLD_PERCENT))
-    tmp_days = int(os.environ.get("TMP_CLEANUP_OLDER_THAN_DAYS", DEFAULT_TMP_DAYS))
-    log_retention_days = int(os.environ.get("LOG_RETENTION_DAYS", DEFAULT_LOG_RETENTION_DAYS))
+    tmp_days = int(os.environ.get(
+        "TMP_FILE_RETENTION_DAYS",
+        os.environ.get("TMP_CLEANUP_OLDER_THAN_DAYS", DEFAULT_TMP_DAYS),
+    ))
+    log_retention_days = int(os.environ.get(
+        "LOG_FILE_RETENTION_DAYS",
+        os.environ.get("LOG_RETENTION_DAYS", DEFAULT_LOG_FILE_RETENTION_DAYS),
+    ))
     ssm_document_name = os.environ.get("SSM_DOCUMENT_NAME", "AWS-RunShellScript")
     ssm_poll_seconds = int(os.environ.get("SSM_POLL_SECONDS", DEFAULT_SSM_POLL_SECONDS))
     ssm_wait_seconds = int(os.environ.get("SSM_WAIT_SECONDS", DEFAULT_SSM_WAIT_SECONDS))
@@ -231,7 +237,7 @@ disk_percent() {{
 }}
 
 top_child_path() {{
-  find "$1" -xdev -mindepth 1 -maxdepth 1 -exec du -xsd {{}} + 2>/dev/null | sort -rn | head -n 1 | cut -f 2-
+  find "$1" -xdev -mindepth 1 -maxdepth 1 -exec du -xs {{}} + 2>/dev/null | sort -rn | head -n 1 | cut -f 2-
 }}
 
 print_top_folders() {{
@@ -248,10 +254,6 @@ open_detector() {{
     echo "lsof"
     return 0
   fi
-  if command -v fuser >/dev/null 2>&1; then
-    echo "fuser"
-    return 0
-  fi
   echo "none"
   return 0
 }}
@@ -259,10 +261,6 @@ open_detector() {{
 is_open_file() {{
   if [ "$OPEN_DETECTOR" = "lsof" ]; then
     lsof -- "$1" >/dev/null 2>&1
-    return $?
-  fi
-  if [ "$OPEN_DETECTOR" = "fuser" ]; then
-    fuser -- "$1" >/dev/null 2>&1
     return $?
   fi
   return 2
@@ -301,7 +299,7 @@ cleanup_tmp() {{
   find /tmp -xdev -type f -mtime +"$TMP_DAYS" -print 2>/dev/null > "$candidate_file"
   while IFS= read -r file_path; do
     [ -n "$file_path" ] || continue
-    delete_file_if_safe "$file_path" "no"
+    delete_file_if_safe "$file_path" "yes"
   done < "$candidate_file"
   rm -f "$candidate_file"
 
@@ -329,7 +327,7 @@ cleanup_logs() {{
   fi
 
   if [ "$OPEN_DETECTOR" = "none" ]; then
-    echo "SKIPPED rotated log deletion because lsof/fuser is unavailable"
+    echo "SKIPPED rotated log deletion because lsof is unavailable"
     return 0
   fi
 
@@ -362,22 +360,36 @@ fi
 OPEN_DETECTOR="$(open_detector)"
 DISK_USED_BEFORE="$(disk_percent)"
 ROOT_TOP="$(top_child_path "$MOUNT_PATH")"
+VAR_TOP=""
+if [ "$MOUNT_PATH" = "/" ] && [ -d /var ]; then
+  VAR_TOP="$(top_child_path /var)"
+fi
 
 echo "REQUESTED_PATH: $REQUESTED_PATH"
 echo "MOUNT_PATH: $MOUNT_PATH"
 echo "OPEN_FILE_DETECTOR: $OPEN_DETECTOR"
 echo "DISK_USED_BEFORE_PERCENT: $DISK_USED_BEFORE"
 echo "HIGHEST_FOLDER: $ROOT_TOP"
+if [ -n "$VAR_TOP" ]; then
+  echo "HIGHEST_VAR_FOLDER: $VAR_TOP"
+fi
 print_top_folders "BEFORE"
 
-if [ "$MOUNT_PATH" = "/tmp" ] || [ "$ROOT_TOP" = "/tmp" ]; then
+if [ "$MOUNT_PATH" != "/" ]; then
+  FAIL_REASON="Requested path is not on the root partition"
+elif [ "$ROOT_TOP" = "/tmp" ]; then
   TARGET_FOLDER="/tmp"
   cleanup_tmp
-elif [ "$MOUNT_PATH" = "/var/log" ]; then
+elif [ "$ROOT_TOP" = "/var" ] && [ "$VAR_TOP" = "/var/log" ]; then
   TARGET_FOLDER="/var/log"
   cleanup_logs
 else
-  FAIL_REASON="Highest folder is not /tmp or /var/log"
+  FAIL_REASON="Root disk pressure is not from /tmp or /var/log"
+fi
+
+if [ "$ACTION_COUNT" -gt 0 ]; then
+  sync
+  sleep 5
 fi
 
 DISK_USED_AFTER="$(disk_percent)"

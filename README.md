@@ -21,8 +21,8 @@ Optional:
 - `REQUIRED_TAG_KEY` default `AutoDiskCleanup`
 - `REQUIRED_TAG_VALUE` default `enabled`
 - `DISK_THRESHOLD_PERCENT` default `85`
-- `TMP_CLEANUP_OLDER_THAN_DAYS` default `1`
-- `LOG_RETENTION_DAYS` default `7`
+- `TMP_FILE_RETENTION_DAYS` default `1`
+- `LOG_FILE_RETENTION_DAYS` default `7`
 - `SSM_DOCUMENT_NAME` default `AWS-RunShellScript`
 - `SSM_POLL_SECONDS` default `3`
 - `SSM_WAIT_SECONDS` default `600`
@@ -30,7 +30,7 @@ Optional:
 
 ## Cleanup Rules
 
-- `/tmp`: deletes files older than `TMP_CLEANUP_OLDER_THAN_DAYS`
+- `/tmp`: deletes files older than `TMP_FILE_RETENTION_DAYS`
 - `/var/log`: vacuums old systemd journal entries and deletes old rotated log files
 
 The run is marked `SUCCESS` only when:
