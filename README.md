@@ -31,12 +31,11 @@ Optional:
 ## Cleanup Rules
 
 - `/tmp`: deletes files older than `TMP_FILE_RETENTION_DAYS`
-- `/var/log`: vacuums old systemd journal entries and deletes old rotated log files
+- `/var/log`: vacuums old systemd journal entries and deletes old rotated log files, older than `LOG_FILE_RETENTION_DAYS`
 
 The run is marked `SUCCESS` only when:
 
-- the target folder was `/tmp` or `/var/log`
-- at least one cleanup action was taken
+- at least one cleanup action was taken in `/tmp` or `/var/log`
 - disk usage after cleanup is below `DISK_THRESHOLD_PERCENT`
 
 Otherwise, the run is marked `FAILED`.
@@ -59,8 +58,6 @@ ec2_disk_cleanup.lambda_handler
 
 Create a CloudWatch alarm for the CloudWatch Agent metric `disk_used_percent`, then route alarm state changes to Lambda with EventBridge.
 
-The Lambda ignores non-`ALARM` state changes.
-
 ## Manual Lambda Test
 
 ```json
@@ -70,38 +67,10 @@ The Lambda ignores non-`ALARM` state changes.
 }
 ```
 
-CloudWatch alarm events are also supported when the alarm metric dimensions include `InstanceId` and optionally `path`.
-
-## IAM Role Requirements
-
-Lambda role:
-
-```json
-{
-  "Effect": "Allow",
-  "Action": [
-    "ec2:DescribeInstances",
-    "ssm:SendCommand",
-    "ssm:GetCommandInvocation",
-    "sns:Publish"
-  ],
-  "Resource": "*"
-}
-```
-
-The Lambda role also needs normal CloudWatch Logs permissions.
-
-EC2 instance profile:
-
-```text
-AmazonSSMManagedInstanceCore
-```
-
 ## Instance Requirements
 
 - SSM Agent installed and running
-- CloudWatch Agent
+- CloudWatch Agent publishing `disk_used_percent`
 - Instance profile with SSM permissions
 - Network access to Systems Manager endpoints
-- CloudWatch Agent publishing `disk_used_percent`
 - Required tag: `AutoDiskCleanup=enabled`
