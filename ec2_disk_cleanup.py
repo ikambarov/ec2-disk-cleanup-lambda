@@ -294,9 +294,17 @@ delete_file_if_safe() {{
 }}
 
 cleanup_tmp() {{
-  echo "ACTION cleaning /tmp files older than $TMP_DAYS days"
+  if [ "$TMP_DAYS" -eq 0 ]; then
+    echo "ACTION cleaning all eligible /tmp files"
+    TMP_AGE_FILTER=""
+  else
+    echo "ACTION cleaning /tmp files older than $TMP_DAYS days"
+    TMP_AGE_FILTER="-mtime +$TMP_DAYS"
+  fi
+
   candidate_file="$(mktemp)"
-  find /tmp -xdev -type f -mtime +"$TMP_DAYS" -print 2>/dev/null > "$candidate_file"
+  # shellcheck disable=SC2086
+  find /tmp -xdev -type f $TMP_AGE_FILTER -print 2>/dev/null > "$candidate_file"
   while IFS= read -r file_path; do
     [ -n "$file_path" ] || continue
     delete_file_if_safe "$file_path" "yes"
@@ -304,7 +312,8 @@ cleanup_tmp() {{
   rm -f "$candidate_file"
 
   candidate_file="$(mktemp)"
-  find /tmp -xdev -depth -mindepth 1 -type d -empty -mtime +"$TMP_DAYS" -print 2>/dev/null > "$candidate_file"
+  # shellcheck disable=SC2086
+  find /tmp -xdev -depth -mindepth 1 -type d -empty $TMP_AGE_FILTER -print 2>/dev/null > "$candidate_file"
   while IFS= read -r dir_path; do
     [ -n "$dir_path" ] || continue
     if rmdir -- "$dir_path" 2>/dev/null; then
@@ -318,8 +327,15 @@ cleanup_tmp() {{
 
 cleanup_logs() {{
   if command -v journalctl >/dev/null 2>&1; then
-    echo "ACTION vacuuming systemd journal older than $LOG_RETENTION_DAYS days"
-    if journalctl --vacuum-time="${{LOG_RETENTION_DAYS}}d" 2>&1 | sed 's/^/JOURNAL: /'; then
+    if [ "$LOG_RETENTION_DAYS" -eq 0 ]; then
+      echo "ACTION vacuuming all archived systemd journal files"
+      JOURNAL_VACUUM_ARG="--vacuum-time=1s"
+    else
+      echo "ACTION vacuuming systemd journal older than $LOG_RETENTION_DAYS days"
+      JOURNAL_VACUUM_ARG="--vacuum-time=${{LOG_RETENTION_DAYS}}d"
+    fi
+
+    if journalctl "$JOURNAL_VACUUM_ARG" 2>&1 | sed 's/^/JOURNAL: /'; then
       ACTION_COUNT=$((ACTION_COUNT + 1))
     else
       echo "SKIPPED journal vacuum failed"
@@ -331,17 +347,26 @@ cleanup_logs() {{
     return 0
   fi
 
-  echo "ACTION deleting rotated /var/log files older than $LOG_RETENTION_DAYS days after in-use check"
+  if [ "$LOG_RETENTION_DAYS" -eq 0 ]; then
+    echo "ACTION deleting all eligible /var/log files after in-use check"
+  else
+    echo "ACTION deleting rotated /var/log files older than $LOG_RETENTION_DAYS days after in-use check"
+  fi
+
   candidate_file="$(mktemp)"
-  find /var/log -xdev -type f \\( \\
-    -name "*.gz" -o \\
-    -name "*.xz" -o \\
-    -name "*.bz2" -o \\
-    -name "*.old" -o \\
-    -name "*.1" -o \\
-    -name "*.log.[0-9]*" -o \\
-    -name "*.log-*" \\
-  \\) -mtime +"$LOG_RETENTION_DAYS" -print 2>/dev/null > "$candidate_file"
+  if [ "$LOG_RETENTION_DAYS" -eq 0 ]; then
+    find /var/log -xdev -type f -print 2>/dev/null > "$candidate_file"
+  else
+    find /var/log -xdev -type f \\( \\
+      -name "*.gz" -o \\
+      -name "*.xz" -o \\
+      -name "*.bz2" -o \\
+      -name "*.old" -o \\
+      -name "*.1" -o \\
+      -name "*.log.[0-9]*" -o \\
+      -name "*.log-*" \\
+    \\) -mtime +"$LOG_RETENTION_DAYS" -print 2>/dev/null > "$candidate_file"
+  fi
 
   while IFS= read -r file_path; do
     [ -n "$file_path" ] || continue
