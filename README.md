@@ -67,6 +67,15 @@ Create a CloudWatch alarm for the CloudWatch Agent metric `disk_used_percent`, t
 }
 ```
 
+## IAM Requirements
+
+Attach these AWS managed policies to the Lambda execution role:
+
+- `arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole`
+- `arn:aws:iam::aws:policy/AmazonEC2ReadOnlyAccess`
+- `arn:aws:iam::aws:policy/AmazonSSMFullAccess`
+- `arn:aws:iam::aws:policy/AmazonSNSFullAccess`
+
 ## Instance Requirements
 
 - SSM Agent installed and running
